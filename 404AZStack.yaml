@@ -1,219 +1,315 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  MedEquip Cloud Infrastructure with MDB and MApp VPCs, VPC Peering, Routing,
-  Security Groups, Bastion Host, and two Web Servers with Apache.
+  PoC Serverless Stack (DynamoDB) - Single VPC with public/private subnets,
+  NAT Gateway, VPC endpoints (S3, DynamoDB), Lambda (VPC), API Gateway, S3 bucket,
+  DynamoDB table. Uses AWS Academy LabRole.
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+  PublicSubnet1Cidr:
+    Type: String
+    Default: 10.0.1.0/24
+  PublicSubnet2Cidr:
+    Type: String
+    Default: 10.0.2.0/24
+  PrivateSubnet1Cidr:
+    Type: String
+    Default: 10.0.3.0/24
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: 10.0.4.0/24
+  LambdaTimeout:
+    Type: Number
+    Default: 30
+  LambdaMemory:
+    Type: Number
+    Default: 256
 
 Resources:
 
-  ### MDB VPC and Subnets
-  MDBVPC:
+  ### VPC and Subnets
+  PoCVPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 10.10.0.0/16
-      EnableDnsSupport: true
+      CidrBlock: !Ref VpcCidr
       EnableDnsHostnames: true
+      EnableDnsSupport: true
       Tags:
         - Key: Name
-          Value: MDB-VPC
+          Value: PoC-VPC
 
-  MDBPrivateSubnet1:
+  PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref MDBVPC
-      CidrBlock: 10.10.1.0/24
+      VpcId: !Ref PoCVPC
+      CidrBlock: !Ref PublicSubnet1Cidr
+      MapPublicIpOnLaunch: true
       AvailabilityZone: !Select [0, !GetAZs '']
       Tags:
         - Key: Name
-          Value: MDB-Private-Subnet-1
+          Value: PoC-Public-Subnet-1
 
-  MDBPrivateSubnet2:
+  PublicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref MDBVPC
-      CidrBlock: 10.10.2.0/24
+      VpcId: !Ref PoCVPC
+      CidrBlock: !Ref PublicSubnet2Cidr
+      MapPublicIpOnLaunch: true
       AvailabilityZone: !Select [1, !GetAZs '']
       Tags:
         - Key: Name
-          Value: MDB-Private-Subnet-2
+          Value: PoC-Public-Subnet-2
 
-  MDBPrivateRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref MDBVPC
-      Tags:
-        - Key: Name
-          Value: MDB-Private-RouteTable
-
-  MDBPrivateSubnet1RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref MDBPrivateSubnet1
-      RouteTableId: !Ref MDBPrivateRouteTable
-
-  MDBPrivateSubnet2RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref MDBPrivateSubnet2
-      RouteTableId: !Ref MDBPrivateRouteTable
-
-  ### MApp VPC and Subnets
-  MAppVPC:
-    Type: AWS::EC2::VPC
-    Properties:
-      CidrBlock: 10.20.0.0/16
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
-      Tags:
-        - Key: Name
-          Value: M-App-VPC
-
-  MAppPublicSubnet1:
+  PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref MAppVPC
-      CidrBlock: 10.20.1.0/24
+      VpcId: !Ref PoCVPC
+      CidrBlock: !Ref PrivateSubnet1Cidr
       AvailabilityZone: !Select [0, !GetAZs '']
-      MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: MApp-Public-Subnet-1
+          Value: PoC-Private-Subnet-1
 
-  MAppPublicSubnet2:
+  PrivateSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref MAppVPC
-      CidrBlock: 10.20.2.0/24
+      VpcId: !Ref PoCVPC
+      CidrBlock: !Ref PrivateSubnet2Cidr
       AvailabilityZone: !Select [1, !GetAZs '']
-      MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: MApp-Public-Subnet-2
+          Value: PoC-Private-Subnet-2
 
-  MAppInternetGateway:
+  ### Internet Gateway and Route Tables
+  InternetGateway:
     Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: MApp-IGW
 
-  MAppAttachGateway:
+  AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
-      VpcId: !Ref MAppVPC
-      InternetGatewayId: !Ref MAppInternetGateway
+      VpcId: !Ref PoCVPC
+      InternetGatewayId: !Ref InternetGateway
 
-  MAppPublicRouteTable:
+  PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref MAppVPC
-      Tags:
-        - Key: Name
-          Value: MApp-Public-RouteTable
+      VpcId: !Ref PoCVPC
 
-  MAppPublicRoute:
+  PublicDefaultRoute:
     Type: AWS::EC2::Route
-    DependsOn: MAppAttachGateway
+    DependsOn: AttachGateway
     Properties:
-      RouteTableId: !Ref MAppPublicRouteTable
+      RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref MAppInternetGateway
+      GatewayId: !Ref InternetGateway
 
-  MAppPublicSubnet1RouteTableAssociation:
+  PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref MAppPublicSubnet1
-      RouteTableId: !Ref MAppPublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
 
-  MAppPublicSubnet2RouteTableAssociation:
+  PublicSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref MAppPublicSubnet2
-      RouteTableId: !Ref MAppPublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
 
-  ### VPC Peering
-  VPCPeeringConnection:
-    Type: AWS::EC2::VPCPeeringConnection
+  ### NAT Gateway
+  NatEip:
+    Type: AWS::EC2::EIP
     Properties:
-      VpcId: !Ref MDBVPC
-      PeerVpcId: !Ref MAppVPC
-      Tags:
-        - Key: Name
-          Value: MDB-MApp-Peering
+      Domain: vpc
 
-  MDBToMAppPeeringRoute:
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref PoCVPC
+
+  PrivateDefaultRoute:
     Type: AWS::EC2::Route
     Properties:
-      RouteTableId: !Ref MDBPrivateRouteTable
-      DestinationCidrBlock: 10.20.0.0/16
-      VpcPeeringConnectionId: !Ref VPCPeeringConnection
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
 
-  MAppPublicToMDBPeeringRoute:
-    Type: AWS::EC2::Route
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      RouteTableId: !Ref MAppPublicRouteTable
-      DestinationCidrBlock: 10.10.0.0/16
-      VpcPeeringConnectionId: !Ref VPCPeeringConnection
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
 
-  ### Bastion Host
-  BastionHost:
-    Type: AWS::EC2::Instance
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      InstanceType: t3.micro
-      KeyName: vockey
-      SubnetId: !Ref MAppPublicSubnet1
-      ImageId: ami-0c02fb55956c7d316  # Amazon Linux 2
-      Tags:
-        - Key: Name
-          Value: BastionHost
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
 
-  ### Web Servers
-  WebServer1:
-    Type: AWS::EC2::Instance
+  ### VPC Endpoints
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
     Properties:
-      InstanceType: t3.micro
-      KeyName: vockey
-      SubnetId: !Ref MAppPublicSubnet1
-      ImageId: ami-0c02fb55956c7d316
-      Tags:
-        - Key: Name
-          Value: WebServer1
-      UserData:
-        Fn::Base64: |
-          #!/bin/bash
-          yum update -y
-          yum install -y httpd
-          systemctl start httpd
-          systemctl enable httpd
-          echo "Welcome to WebServer1 in AZ1!" > /var/www/html/index.html
+      VpcId: !Ref PoCVPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTable
+      VpcEndpointType: Gateway
 
-  WebServer2:
-    Type: AWS::EC2::Instance
+  DynamoDbGatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
     Properties:
-      InstanceType: t3.micro
-      KeyName: vockey
-      SubnetId: !Ref MAppPublicSubnet2
-      ImageId: ami-0c02fb55956c7d316
-      Tags:
-        - Key: Name
-          Value: WebServer2
-      UserData:
-        Fn::Base64: |
-          #!/bin/bash
-          yum update -y
-          yum install -y httpd
-          systemctl start httpd
-          systemctl enable httpd
-          echo "Welcome to WebServer2 in AZ2!" > /var/www/html/index.html
+      VpcId: !Ref PoCVPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.dynamodb
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTable
+      VpcEndpointType: Gateway
+
+  ### Security Groups
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Lambda
+      VpcId: !Ref PoCVPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  ### S3 Bucket
+  PoCS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub poc-dyn-${AWS::AccountId}-${AWS::Region}
+      VersioningConfiguration:
+        Status: Enabled
+
+  ### DynamoDB Table
+  PoCDynamoTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: PoCLogs
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
+  ### Lambda Function (uses LabRole directly)
+  PoCLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: PoC-Handler
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Role: arn:aws:iam::690471439659:role/LabRole
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemory
+      VpcConfig:
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref PoCS3Bucket
+          DDB_TABLE: !Ref PoCDynamoTable
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const ddb = new AWS.DynamoDB.DocumentClient();
+          const s3 = new AWS.S3();
+          exports.handler = async (event) => {
+            const now = new Date().toISOString();
+            const payload = event.body ? JSON.parse(event.body) : { msg: 'test' };
+            const item = { pk: 'pocevent', sk: now, payload };
+            await ddb.put({ TableName: process.env.DDB_TABLE, Item: item }).promise();
+            await s3.putObject({
+              Bucket: process.env.S3_BUCKET,
+              Key: `pocevents/${now}.json`,
+              Body: JSON.stringify(item),
+              ContentType: 'application/json'
+            }).promise();
+            return { statusCode: 200, body: JSON.stringify({ message: 'OK', time: now }) };
+          };
+
+  ### Log Group
+  PoCLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${PoCLambdaFunction}
+      RetentionInDays: 30
+
+  ### API Gateway
+  PoCApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: PoC-API
+
+  PoCResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PoCApi
+      ParentId: !GetAtt PoCApi.RootResourceId
+      PathPart: poc
+
+  PoCMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref PoCApi
+      ResourceId: !Ref PoCResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PoCLambdaFunction.Arn}/invocations
+
+  PoCDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: PoCMethod
+    Properties:
+      RestApiId: !Ref PoCApi
+
+  PoCStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: prod
+      RestApiId: !Ref PoCApi
+      DeploymentId: !Ref PoCDeployment
+
+  LambdaPermissionForApi:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PoCLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PoCApi}/*/POST/poc
 
 Outputs:
-  WebServer1PublicIP:
-    Description: Public IP of Web Server 1
-    Value: !GetAtt WebServer1.PublicIp
+  ApiInvokeUrl:
+    Description: "POST URL for PoC API"
+    Value: !Sub https://${PoCApi}.execute-api.${AWS::Region}.amazonaws.com/prod/poc
 
-  WebServer2PublicIP:
-    Description: Public IP of Web Server 2
-    Value: !GetAtt WebServer2.PublicIp
+  S3BucketName:
+    Description: "PoC S3 bucket name"
+    Value: !Ref PoCS3Bucket
 
-  BastionHostPublicIP:
-    Description: Public IP of the Bastion Host
-    Value: !GetAtt BastionHost.PublicIp
+  DynamoDBTableName:
+    Description: "PoC DynamoDB table name"
+    Value: !Ref PoCDynamoTable
