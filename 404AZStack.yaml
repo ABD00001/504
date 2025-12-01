@@ -1,0 +1,219 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  MedEquip Cloud Infrastructure with MDB and MApp VPCs, VPC Peering, Routing,
+  Security Groups, Bastion Host, and two Web Servers with Apache.
+
+Resources:
+
+  ### MDB VPC and Subnets
+  MDBVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.10.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MDB-VPC
+
+  MDBPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MDBVPC
+      CidrBlock: 10.10.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: MDB-Private-Subnet-1
+
+  MDBPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MDBVPC
+      CidrBlock: 10.10.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: MDB-Private-Subnet-2
+
+  MDBPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MDBVPC
+      Tags:
+        - Key: Name
+          Value: MDB-Private-RouteTable
+
+  MDBPrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MDBPrivateSubnet1
+      RouteTableId: !Ref MDBPrivateRouteTable
+
+  MDBPrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MDBPrivateSubnet2
+      RouteTableId: !Ref MDBPrivateRouteTable
+
+  ### MApp VPC and Subnets
+  MAppVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: M-App-VPC
+
+  MAppPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MAppVPC
+      CidrBlock: 10.20.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: MApp-Public-Subnet-1
+
+  MAppPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MAppVPC
+      CidrBlock: 10.20.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: MApp-Public-Subnet-2
+
+  MAppInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MApp-IGW
+
+  MAppAttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MAppVPC
+      InternetGatewayId: !Ref MAppInternetGateway
+
+  MAppPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MAppVPC
+      Tags:
+        - Key: Name
+          Value: MApp-Public-RouteTable
+
+  MAppPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: MAppAttachGateway
+    Properties:
+      RouteTableId: !Ref MAppPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MAppInternetGateway
+
+  MAppPublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MAppPublicSubnet1
+      RouteTableId: !Ref MAppPublicRouteTable
+
+  MAppPublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MAppPublicSubnet2
+      RouteTableId: !Ref MAppPublicRouteTable
+
+  ### VPC Peering
+  VPCPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref MDBVPC
+      PeerVpcId: !Ref MAppVPC
+      Tags:
+        - Key: Name
+          Value: MDB-MApp-Peering
+
+  MDBToMAppPeeringRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref MDBPrivateRouteTable
+      DestinationCidrBlock: 10.20.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeeringConnection
+
+  MAppPublicToMDBPeeringRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref MAppPublicRouteTable
+      DestinationCidrBlock: 10.10.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeeringConnection
+
+  ### Bastion Host
+  BastionHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: vockey
+      SubnetId: !Ref MAppPublicSubnet1
+      ImageId: ami-0c02fb55956c7d316  # Amazon Linux 2
+      Tags:
+        - Key: Name
+          Value: BastionHost
+
+  ### Web Servers
+  WebServer1:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: vockey
+      SubnetId: !Ref MAppPublicSubnet1
+      ImageId: ami-0c02fb55956c7d316
+      Tags:
+        - Key: Name
+          Value: WebServer1
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd
+          systemctl start httpd
+          systemctl enable httpd
+          echo "Welcome to WebServer1 in AZ1!" > /var/www/html/index.html
+
+  WebServer2:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: vockey
+      SubnetId: !Ref MAppPublicSubnet2
+      ImageId: ami-0c02fb55956c7d316
+      Tags:
+        - Key: Name
+          Value: WebServer2
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd
+          systemctl start httpd
+          systemctl enable httpd
+          echo "Welcome to WebServer2 in AZ2!" > /var/www/html/index.html
+
+Outputs:
+  WebServer1PublicIP:
+    Description: Public IP of Web Server 1
+    Value: !GetAtt WebServer1.PublicIp
+
+  WebServer2PublicIP:
+    Description: Public IP of Web Server 2
+    Value: !GetAtt WebServer2.PublicIp
+
+  BastionHostPublicIP:
+    Description: Public IP of the Bastion Host
+    Value: !GetAtt BastionHost.PublicIp
