@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   PoC Serverless Stack - Single VPC with public/private subnets,
   NAT Gateway, VPC endpoints (S3, DynamoDB), Lambda (VPC), API Gateway,
-  S3 bucket, DynamoDB table. Uses AWS Academy LabRole.
+  S3 bucket, DynamoDB table. Lambda execution role created in this account.
 
 Parameters:
   VpcCidr:
@@ -209,14 +209,31 @@ Resources:
           KeyType: RANGE
       BillingMode: PAY_PER_REQUEST
 
-  ### Lambda Function (LabRole only)
+  ### Lambda Execution Role (Created in this account)
+  PoCLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: PoCLambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  ### Lambda Function
   PoCLambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: PoC-Handler
       Runtime: nodejs18.x
       Handler: index.handler
-      Role: arn:aws:iam::690471439659:role/LabRole   # Replace with YOUR LabRole ARN
+      Role: !GetAtt PoCLambdaExecutionRole.Arn
       Timeout: !Ref LambdaTimeout
       MemorySize: !Ref LambdaMemory
       VpcConfig:
