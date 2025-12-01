@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   PoC Serverless Stack - Single VPC with public/private subnets,
-  NAT Gateway, VPC endpoints (S3 & DynamoDB), Lambda (VPC), API Gateway,
-  S3 bucket for logs, DynamoDB table for logs. Uses AWS Academy LabRole.
+  NAT Gateway, VPC endpoints (S3, DynamoDB), Lambda (VPC), API Gateway,
+  S3 bucket, DynamoDB table. Uses AWS Academy LabRole.
 
 Parameters:
   VpcCidr:
@@ -29,15 +29,16 @@ Parameters:
 
 Resources:
 
-  ## ---------------------------
-  ## VPC + Subnets
-  ## ---------------------------
+  ### VPC and Subnets
   PoCVPC:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: !Ref VpcCidr
       EnableDnsHostnames: true
       EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: PoC-VPC
 
   PublicSubnet1:
     Type: AWS::EC2::Subnet
@@ -46,6 +47,9 @@ Resources:
       CidrBlock: !Ref PublicSubnet1Cidr
       MapPublicIpOnLaunch: true
       AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: PoC-Public-Subnet-1
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
@@ -54,6 +58,9 @@ Resources:
       CidrBlock: !Ref PublicSubnet2Cidr
       MapPublicIpOnLaunch: true
       AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: PoC-Public-Subnet-2
 
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
@@ -61,6 +68,9 @@ Resources:
       VpcId: !Ref PoCVPC
       CidrBlock: !Ref PrivateSubnet1Cidr
       AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: PoC-Private-Subnet-1
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
@@ -68,10 +78,11 @@ Resources:
       VpcId: !Ref PoCVPC
       CidrBlock: !Ref PrivateSubnet2Cidr
       AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: PoC-Private-Subnet-2
 
-  ## ---------------------------
-  ## Internet Gateway + Routing
-  ## ---------------------------
+  ### Internet Gateway and Route Tables
   InternetGateway:
     Type: AWS::EC2::InternetGateway
 
@@ -94,21 +105,19 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-  PublicSubnet1Assoc:
+  PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnet1
       RouteTableId: !Ref PublicRouteTable
 
-  PublicSubnet2Assoc:
+  PublicSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
 
-  ## ---------------------------
-  ## NAT Gateway + Private Routes
-  ## ---------------------------
+  ### NAT Gateway
   NatEip:
     Type: AWS::EC2::EIP
     Properties:
@@ -132,22 +141,20 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NatGateway
 
-  PrivateSubnet1Assoc:
+  PrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnet1
       RouteTableId: !Ref PrivateRouteTable
 
-  PrivateSubnet2Assoc:
+  PrivateSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnet2
       RouteTableId: !Ref PrivateRouteTable
 
-  ## ---------------------------
-  ## VPC Endpoints
-  ## ---------------------------
-  S3Endpoint:
+  ### VPC Endpoints
+  S3GatewayEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
       VpcId: !Ref PoCVPC
@@ -157,7 +164,7 @@ Resources:
         - !Ref PrivateRouteTable
       VpcEndpointType: Gateway
 
-  DynamoDBEndpoint:
+  DynamoDbGatewayEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
       VpcId: !Ref PoCVPC
@@ -167,21 +174,17 @@ Resources:
         - !Ref PrivateRouteTable
       VpcEndpointType: Gateway
 
-  ## ---------------------------
-  ## Security Group
-  ## ---------------------------
+  ### Security Groups
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Lambda SG
+      GroupDescription: Security group for Lambda
       VpcId: !Ref PoCVPC
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
 
-  ## ---------------------------
-  ## S3 Bucket (Logs)
-  ## ---------------------------
+  ### S3 Bucket for logs
   PoCS3Bucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -189,9 +192,7 @@ Resources:
       VersioningConfiguration:
         Status: Enabled
 
-  ## ---------------------------
-  ## DynamoDB Table (Logs)
-  ## ---------------------------
+  ### DynamoDB Table
   PoCDynamoTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -208,16 +209,14 @@ Resources:
           KeyType: RANGE
       BillingMode: PAY_PER_REQUEST
 
-  ## ---------------------------
-  ## Lambda (Uses LabRole)
-  ## ---------------------------
+  ### Lambda Function (LabRole only)
   PoCLambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: PoC-Handler
       Runtime: nodejs18.x
       Handler: index.handler
-      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole
+      Role: arn:aws:iam::690471439659:role/LabRole   # Replace with YOUR LabRole ARN
       Timeout: !Ref LambdaTimeout
       MemorySize: !Ref LambdaMemory
       VpcConfig:
@@ -249,18 +248,14 @@ Resources:
             return { statusCode: 200, body: JSON.stringify({ message: 'OK', time: now }) };
           };
 
-  ## ---------------------------
-  ## Log Group
-  ## ---------------------------
+  ### Lambda Log Group
   PoCLambdaLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /aws/lambda/PoC-Handler
-      RetentionInDays: 14
+      LogGroupName: !Sub /aws/lambda/${PoCLambdaFunction}
+      RetentionInDays: 30
 
-  ## ---------------------------
-  ## API Gateway
-  ## ---------------------------
+  ### API Gateway
   PoCApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -316,5 +311,5 @@ Outputs:
     Value: !Ref PoCS3Bucket
 
   DynamoDBTableName:
-    Description: "PoC DynamoDB table"
+    Description: "PoC DynamoDB table name"
     Value: !Ref PoCDynamoTable
